@@ -7,7 +7,7 @@ import org.apache.spark.sql.{Encoder, Encoders}
 import org.apache.spark.sql.types._
 import java.util.TreeMap
 
-case class Visit(date: String, country: String, revenue: Float, ip: Long)
+case class UserVisit(date: String, country: String, revenue: Float, ip: Long)
 
 object DataFrameApp {
 
@@ -29,23 +29,30 @@ object DataFrameApp {
     hc.set("fs.s3a.aws.credentials.provider",
       "org.apache.hadoop.fs.s3a.AnonymousAWSCredentialsProvider")
 
-    val uv = spark
+    def uvCsv = { StructType(Array(
+      StructField("sourceIP", StringType, true),
+      StructField("destURL", StringType, true),
+      StructField("visitDate", StringType, true),
+      StructField("adRevenue", FloatType, true),
+      StructField("userAgent", StringType, true),
+      StructField("countryCode", StringType, true),
+      StructField("languageCode", StringType, true),
+      StructField("searchWord", StringType, true),
+      StructField("duration", IntegerType, true)))
+    }
+
+    val userVisitEncoder = Encoders.product[UserVisit]
+
+    val parsedUv = spark
       .read
       .format("csv")
+      .schema(uvCsv)
       .option("header", true)
       .load(uvPath)
-
-
-    val visitEncoder = Encoders.product[Visit]
-
-
-    val parsedUv = uv.map(r => Visit(
-      r.getString(2).take(4),
-      r.getString(5),
-      r.getString(3).toFloat,
-      ipToLong(r.getString(0)),
-    ))(visitEncoder)
-
+      .map {
+        case Row(sourceIP: String, destURL: String, visitDate: String, adRevenue: Float, userAgent: String, countryCode: String, languageCode: String, searchWord: String, duration: Int)
+        => UserVisit(visitDate.take(4), countryCode, adRevenue, ipToLong(sourceIP))
+      }(userVisitEncoder)
 
     parsedUv.show(3)
 
@@ -116,7 +123,7 @@ object DataFrameApp {
       .map { case ((year, country, city), revenue) => (year, (country, city, revenue)) }
       .groupBy { case (year, (country, city, revenue)) => year }
       .mapValues(_.toList.map { case (year, (country, city, revenue)) => (country, city, revenue) }.sortBy { case (country, city, revenue) => revenue }.reverse.take(3))
-      .sortBy { case (year, List(country, city, revenue)) => year }
+      .sortBy { case (year, List(country, city, revenue)) => year } //(_._1)
       .take(10)
       .foreach(println)
 
